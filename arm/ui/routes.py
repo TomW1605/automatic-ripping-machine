@@ -710,6 +710,7 @@ def home():
                            ram=mem_total, ramused=mem_used, ramfree=mem_free, ram_percent=ram_percent,
                            ramdump=str(temps))
 
+
 @app.route('/joblist')
 def joblist():
     # app.logger.info('Processing default request')
@@ -748,6 +749,7 @@ def joblist():
         jobs = {}
 
     return render_template('joblist.html', jobs=jobs)
+
 
 @app.route('/import_movies')
 @login_required
