@@ -67,6 +67,7 @@ class Job(db.Model):
         context = pyudev.Context()
         device = pyudev.Devices.from_device_file(context, self.devpath)
         self.disctype = "unknown"
+
         for key, value in device.items():
             if key == "ID_FS_LABEL":
                 self.label = value
