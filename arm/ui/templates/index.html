@@ -137,7 +137,7 @@
 										</div>\
 										</div>');
                     $.get(hrrref, function (data) {
-                        console.log(data['success']); // John	
+                        console.log(data['success']); // John
                         console.log("#jobId" + activeJob)
                         if (data['success'] === true) {
                             if (data['mode'] === "abandon") {
@@ -196,7 +196,7 @@
                 actionType = button.data('type') // Extract info from data-* attributes
                 hrrref = button.data('href')
                 activeJob = button.data('jobid')
-                //jobId = job.job_id 
+                //jobId = job.job_id
                 console.log(hrrref)
                 console.log(activeJob)
                 console.log(actionType)
@@ -284,7 +284,7 @@
 
         function refreshJobs() {
             $.ajax({
-                url: "/json?mode=joblist",
+                url: "json?mode=joblist",
                 type: "get",
                 success: function (data) {
                     $('.card-deck').html('')
