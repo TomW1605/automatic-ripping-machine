@@ -15,7 +15,7 @@ from time import sleep
 from flask import Flask, render_template, make_response, abort, request, send_file, flash, \
     redirect, url_for  # noqa: F401
 from arm.ui import app, db
-from arm.models.models import Job, Config, Track, User, Alembic_version  # noqa: F401
+from arm.models.models import Job, Config, Track, User, Alembic_version, UISettings  # noqa: F401
 from arm.config.config import cfg
 from arm.ui.forms import TitleSearchForm, ChangeParamsForm, CustomTitleForm, SettingsForm
 from pathlib import Path, PurePath
@@ -441,6 +441,20 @@ def settings():
     return render_template('settings.html', settings=cfg, form=form, raw=x, jsoncomments=comments)
 
 
+@app.route('/ui_settings', methods=['GET', 'POST'])
+@login_required
+def ui_settings():
+    """
+    The settings page - allows the user to update the arm.yaml without needing to open a text editor
+    Also triggers a restart of flask for debugging.
+    This wont work well if flask isnt run in debug mode
+
+    This needs rewritten to be static
+    """
+    armui_cfg = UISettings.query.filter_by().first()
+    return render_template('ui_settings.html', form=SettingsForm(), settings=armui_cfg)
+
+
 @app.route('/logs')
 @login_required
 def logs():
@@ -612,12 +626,14 @@ def changeparams():
     # app.logger.debug(config.pretty_table())
     job = Job.query.get(config_id)
     config = job.config
+    for key, value in cfg.items():
+        setattr(config, key, value)
     form = ChangeParamsForm(obj=config)
     if form.validate_on_submit():
-        config.MINLENGTH = format(form.MINLENGTH.data)
-        config.MAXLENGTH = format(form.MAXLENGTH.data)
-        config.RIPMETHOD = format(form.RIPMETHOD.data)
-        config.MAINFEATURE = bool(format(form.MAINFEATURE.data))  # must be 1 for True 0 for False
+        cfg["MINLENGTH"] = config.MINLENGTH = format(form.MINLENGTH.data)
+        cfg["MAXLENGTH"] = config.MAXLENGTH = format(form.MAXLENGTH.data)
+        cfg["RIPMETHOD"] = config.RIPMETHOD = format(form.RIPMETHOD.data)
+        cfg["MAINFEATURE"] = config.MAINFEATURE = bool(format(form.MAINFEATURE.data))  # must be 1 for True 0 for False
         app.logger.debug(f"main={config.MAINFEATURE}")
         job.disctype = format(form.DISCTYPE.data)
         db.session.commit()
