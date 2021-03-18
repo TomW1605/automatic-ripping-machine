@@ -822,22 +822,16 @@ def move(source, destination, remove_empty=False):
         logging.error("source does not exist")
         return
 
-    if os.path.isdir(source): # source is directory
+    if os.path.isdir(source):  # source is directory
         logging.info("source is directory")
         if source[-1] != os.path.sep:
             source += os.path.sep
 
-
-
-
-    elif os.path.isfile(source): # source is file
+    elif os.path.isfile(source):  # source is file
         logging.info("source is file")
     else:
         logging.error("source is an unknown file type")
         return
-
-
-
 
 def move_files(basepath, filename, job, ismainfeature=False):
     """Move files into final media directory\n
@@ -923,9 +917,9 @@ def rename_files(oldpath, job):
     else:
         typeSubFolder = "unidentified"
 
-    #if job.hasnicetitle:
+    # if job.hasnicetitle:
     newpath = os.path.join(cfg["COMPLETED_PATH"], str(typeSubFolder), job.title + " (" + str(job.year) + ")")
-    #else:
+    # else:
     #    newpath = os.path.join(cfg["COMPLETED_PATH"], job.title + " (" + str(job.year) + ")")
 
     logging.debug("oldpath: " + oldpath + " newpath: " + newpath)

@@ -202,14 +202,14 @@ def main(logfile, job):
                 # if we have a nice title, set the folder to MEDIA_DIR and not the unidentified ARMPATH
 
                 # None of this is needed. we already have a path we just need to ad to it so no point regenerating it completely
-                # if job.hasnicetitle:
+                """if job.hasnicetitle:
                     # Dont use the year if its  0000
-                # if job.year != "0000" or job.year != "":
-                    # hb_out_path = os.path.join(cfg["MEDIA_DIR"], str(typeSubFolder), f"{job.title} ({job.year}) {ts}")
-                # else:
-                    # hb_out_path = os.path.join(cfg["MEDIA_DIR"], str(typeSubFolder), f"{job.title} {ts}")
-                # else:
-                    # hb_out_path = os.path.join(cfg["ARMPATH"], str(job.title) + "_" + str(ts))
+                if job.year != "0000" or job.year != "":
+                    hb_out_path = os.path.join(cfg["MEDIA_DIR"], str(typeSubFolder), f"{job.title} ({job.year}) {ts}")
+                else:
+                    hb_out_path = os.path.join(cfg["MEDIA_DIR"], str(typeSubFolder), f"{job.title} {ts}")
+                else:
+                    hb_out_path = os.path.join(cfg["ARMPATH"], str(job.title) + "_" + str(ts))"""
 
                 hb_out_path = hb_out_path + "_" + str(ts)
 
