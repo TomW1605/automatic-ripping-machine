@@ -833,6 +833,7 @@ def move(source, destination, remove_empty=False):
         logging.error("source is an unknown file type")
         return
 
+
 def move_files(basepath, filename, job, ismainfeature=False):
     """Move files into final media directory\n
     basepath = path to source directory\n
