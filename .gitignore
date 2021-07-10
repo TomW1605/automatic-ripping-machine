@@ -16,7 +16,6 @@ arm.conf
 arm.yaml
 *.db
 *.log
-*.json
 .abdce.conf
 *.old
 __pycache__
@@ -26,5 +25,5 @@ venv/*
 *.rar
 installed
 .idea/.name
-arm/config/config.py
-scripts/arm_wrapper.sh
+*config.py
+*arm_wrapper.sh

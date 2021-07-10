@@ -7,7 +7,6 @@ import sys  # noqa: F401
 import bcrypt
 import hashlib
 import json
-import yaml
 import requests
 import arm.ui.utils as utils
 
@@ -15,9 +14,9 @@ from time import sleep
 from flask import Flask, render_template, request, send_file, flash, \
     redirect, url_for  # noqa: F401
 from arm.ui import app, db
-from arm.models.models import Job, Config, Track, User, Alembic_version, UISettings  # noqa: F401
+from arm.models.models import Job, Config, Track, User, AlembicVersion, UISettings  # noqa: F401
 from arm.config.config import cfg
-from arm.ui.forms import TitleSearchForm, ChangeParamsForm, CustomTitleForm, SettingsForm, UiSettingsForm
+from arm.ui.forms import TitleSearchForm, ChangeParamsForm, CustomTitleForm, SettingsForm, UiSettingsForm, SetupForm
 from pathlib import Path, PurePath
 from flask.logging import default_handler  # noqa: F401
 from flask_login import LoginManager, login_required, current_user, login_user, UserMixin, logout_user  # noqa: F401
@@ -71,27 +70,13 @@ def setup():
     dir2 = Path(cfg['TRANSCODE_PATH'])
     dir3 = Path(cfg['COMPLETED_PATH'])
     dir4 = Path(cfg['LOGPATH'])
-    app.logger.debug("dir0 " + str(dir0))
-    app.logger.debug("dir1 " + str(dir1))
-    app.logger.debug("dir2 " + str(dir2))
-    app.logger.debug("dir3 " + str(dir3))
-    app.logger.debug("dir4 " + str(dir4))
+    x = [dir0, dir1, dir2, dir3, dir4]
+
     try:
-        if not Path.exists(dir0):
-            os.makedirs(dir0)
-            flash(f"{dir0} was created successfully.")
-        if not Path.exists(dir1):
-            os.makedirs(dir1)
-            flash(f"{dir1} was created successfully.")
-        if not Path.exists(dir2):
-            os.makedirs(dir2)
-            flash(f"{dir2} was created successfully.")
-        if not Path.exists(dir3):
-            os.makedirs(dir3)
-            flash(f"{dir3} was created successfully.")
-        if not Path.exists(dir4):
-            os.makedirs(dir4)
-            flash(f"{dir4} was created successfully.")
+        for arm_dir in x:
+            if not Path.exists(arm_dir):
+                os.makedirs(arm_dir)
+                flash(f"{arm_dir} was created successfully.")
     except FileNotFoundError as e:
         flash(f"Creation of the directory {dir0} failed {e}", "danger")
         app.logger.debug(f"Creation of the directory failed - {e}")
@@ -124,54 +109,65 @@ def setup_stage2():
     This is the second stage of setup this will allow the user to create an admin account
     this will also be the page for resetting the admin account password
     """
-    over = request.values.get('override') if request.method == 'POST' else request.args.get('override')
     try:
         # Return the user to login screen if we dont error when calling for any users
         users = User.query.all()
-        if users and over is None:
-            flash("over = " + str(over))
+        if users:
             flash('You cannot create more than 1 admin account')
             return redirect(url_for('login'))
     except Exception:
         app.logger.debug("No admin account found")
 
-    save = False
-    try:
-        save = request.form['save']
-    except KeyError:
-        app.logger.debug("no post")
-
     # After a login for is submitted
-    if save:
+    form = SetupForm()
+    if form.validate_on_submit():
+        app.logger.debug("We valid")
         username = str(request.form['username']).strip()
         pass1 = str(request.form['password']).strip().encode('utf-8')
-        gen_hash = bcrypt.gensalt(12)
+        hashed = bcrypt.gensalt(12)
+        hashedpassword = bcrypt.hashpw(pass1, hashed)
+        user = User(email=username, password=hashedpassword, hashed=hashed)
+        db.session.add(user)
+        # app.logger.debug("user: " + username + " Pass:" + pass1.decode('utf-8'))
+        try:
+            db.session.commit()
+        except Exception as e:
+            flash(str(e), "danger")
+            return redirect('/setup-stage2')
+        else:
+            return redirect(url_for('login'))
+    return render_template('setup.html', form=form)
 
-        if username and pass1:
-            user = User.query.filter_by(email=username).first()
-            hashedpassword = bcrypt.hashpw(pass1, gen_hash)
-            if user is None:
-                user = User(email=username, password=hashedpassword, hashed=gen_hash)
-                db.session.add(user)
-            else:
-                user.password = hashedpassword
-                user.hash = gen_hash
-                app.logger.debug("hashedpass = " + str(hashedpassword))
-            app.logger.debug("user: " + username + " Pass:" + pass1.decode('utf-8'))
-            app.logger.debug("user db " + str(user))
 
+@app.route('/update_password', methods=['GET', 'POST'])
+@login_required
+def update_password():
+    """
+    updating password for the admin account
+    """
+    # After a login for is submitted
+    form = SetupForm()
+    if form.validate_on_submit():
+        username = str(request.form['username']).strip()
+        new_password = str(request.form['newpassword']).strip().encode('utf-8')
+        user = User.query.filter_by(email=username).first()
+        password = user.password
+        hashed = user.hash
+        # our new one
+        login_hashed = bcrypt.hashpw(str(request.form['password']).strip().encode('utf-8'), hashed)
+        if login_hashed == password:
+            hashed_password = bcrypt.hashpw(new_password, hashed)
+            user.password = hashed_password
+            user.hash = hashed
             try:
                 db.session.commit()
+                flash("Password successfully updated", "success")
+                return redirect("logout")
             except Exception as e:
                 flash(str(e), "danger")
-                return redirect('/setup-stage2')
-            else:
-                return redirect(url_for('login'))
         else:
-            app.logger.debug("user: " + str(username) + " Pass:" + str(pass1))
-            flash("error something was blank")
-            return redirect('/setup-stage2')
-    return render_template('setup.html', title='setup', override=over)
+            flash("Password couldn't be updated. Problem with old password", "danger")
+    return render_template('update_password.html', form=form)
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -190,37 +186,30 @@ def login():
     # if user is logged in
     if current_user.is_authenticated:
         return redirect('/index')
-    save = False
-    try:
-        save = request.form['save']
-    except KeyError:
-        app.logger.debug("no post")
 
-    # After a login for is submitted
-    if save:
+    form = SetupForm()
+    if form.validate_on_submit():
         email = request.form['username']
         # TODO: we know there is only ever 1 admin account,
         #  so we can pull it and check against it locally
         user = User.query.filter_by(email=str(email).strip()).first()
         if user is None:
-            return render_template('login.html', success="false", raw='Invalid username')
+            flash('Invalid username', 'danger')
+            return render_template('login.html', form=form)
         app.logger.debug("user= " + str(user))
-        # our previous pass
+        # our pass
         password = user.password
         hashed = user.hash
-        # our new one
+        # hashed pass the user provided
         loginhashed = bcrypt.hashpw(str(request.form['password']).strip().encode('utf-8'), hashed)
 
         if loginhashed == password:
             login_user(user)
             app.logger.debug("user was logged in - redirecting")
             return redirect('/index')
-        elif user is None:
-            return render_template('login.html', success="false", raw='Invalid username')
         else:
-            return render_template('login.html', success="false", raw='Invalid Password')
-
-    return render_template('login.html', title='Sign In')
+            flash('Password is wrong', 'danger')
+    return render_template('login.html', form=form)
 
 
 @app.route('/database')
@@ -232,14 +221,17 @@ def database():
     Currently outputs every job from the databse - this can cause serious slow downs with + 3/4000 entries
     Pagination is needed!
     """
+
+    page = request.args.get('page', 1, type=int)
     # Check for database file
     if os.path.isfile(cfg['DBFILE']):
-        jobs = Job.query.filter_by().order_by(db.desc(Job.job_id))
+        # jobs = Job.query.filter_by().order_by(db.desc(Job.job_id))
+        jobs = Job.query.order_by().paginate(page, 100, False)
     else:
         app.logger.error('ERROR: /database no database, file doesnt exist')
         jobs = {}
 
-    return render_template('database.html', jobs=jobs, date_format=cfg['DATE_FORMAT'])
+    return render_template('database.html', jobs=jobs.items, date_format=cfg['DATE_FORMAT'], pages=jobs)
 
 
 @app.route('/json', methods=['GET', 'POST'])
@@ -300,25 +292,9 @@ def settings():
     """
     x = ""
     arm_cfg_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../..", "arm.yaml")
-    comments_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "comments.json")
-    try:
-        with open(comments_file, "r") as f:
-            try:
-                comments = json.load(f)
-            except Exception as e:
-                app.logger.debug(f"Error with comments file. {e}")
-                return render_template("error.html", error=str(e))
-    except FileNotFoundError:
-        return render_template("error.html", error="Couldn't find the comment.json file")
-    # Import the cfg again as we want the latest values, not stale.
-    try:
-        with open(arm_cfg_file, "r") as f:
-            try:
-                cfg = yaml.load(f, Loader=yaml.FullLoader)
-            except Exception:
-                cfg = yaml.safe_load(f)  # For older versions use this
-    except FileNotFoundError:
-        return render_template("error.html", error="Couldn't find the arm.yaml file")
+    comments = utils.generate_comments()
+    cfg = utils.get_settings(arm_cfg_file)
+
     form = SettingsForm()
     if form.validate_on_submit():
         # For testing
@@ -345,9 +321,10 @@ def settings():
                     arm_cfg += "\n" + comments['ARM_CFG_GROUPS']['NOTIFY_PERMS']
                 elif k == "APPRISE":
                     arm_cfg += "\n" + comments['ARM_CFG_GROUPS']['APPRISE']
-
-                arm_cfg += "\n" + comments[str(k)] + "\n" if comments[str(k)] != "" else ""
-
+                try:
+                    arm_cfg += "\n" + comments[str(k)] + "\n" if comments[str(k)] != "" else ""
+                except KeyError:
+                    arm_cfg += "\n"
                 try:
                     post_value = int(v)
                     arm_cfg += f"{k}: {post_value}\n"
@@ -444,10 +421,6 @@ def logreader():
     This will display or allow downloading the requested logfile
     This is where the XHR requests are sent when viewing /logs?=logfile
     """
-    # use logger
-    # app.logger.info('Processing default request')
-    # app.logger.debug('DEBUGGING')
-    # app.logger.error('ERROR Inside /logreader')
 
     # Setup our vars
     logpath = cfg['LOGPATH']
@@ -456,9 +429,8 @@ def logreader():
     logfile = request.args.get('logfile')
     if logfile is None or "../" in logfile or mode is None:
         return render_template('error.html')
-    # Assemble full path
     fullpath = os.path.join(logpath, logfile)
-    # Check if the logfile exists
+
     my_file = Path(fullpath)
     if not my_file.is_file():
         # logfile doesnt exist throw out error template
@@ -517,14 +489,17 @@ def history():
     Smaller much simpler output of previously run jobs
 
     """
+    page = request.args.get('page', 1, type=int)
     if os.path.isfile(cfg['DBFILE']):
-        jobs = Job.query.filter_by()
+        # after roughly 175 entries firefox readermode will break
+        # jobs = Job.query.filter_by().limit(175).all()
+        jobs = Job.query.order_by().paginate(page, 100, False)
     else:
         app.logger.error('ERROR: /history database file doesnt exist')
         jobs = {}
     app.logger.debug(cfg['DATE_FORMAT'])
 
-    return render_template('history.html', jobs=jobs, date_format=cfg['DATE_FORMAT'])
+    return render_template('history.html', jobs=jobs.items, date_format=cfg['DATE_FORMAT'], pages=jobs)
 
 
 @app.route('/jobdetail', methods=['GET', 'POST'])
@@ -550,7 +525,7 @@ def jobdetail():
 @login_required
 def submitrip():
     """
-    ...
+    The initial search page
     """
     job_id = request.args.get('job_id')
     job = Job.query.get(job_id)
@@ -572,8 +547,6 @@ def changeparams():
     # app.logger.debug(config.pretty_table())
     job = Job.query.get(config_id)
     config = job.config
-    for key, value in cfg.items():
-        setattr(config, key, value)
     form = ChangeParamsForm(obj=config)
     if form.validate_on_submit():
         cfg["MINLENGTH"] = config.MINLENGTH = format(form.MINLENGTH.data)
@@ -582,6 +555,8 @@ def changeparams():
         cfg["MAINFEATURE"] = config.MAINFEATURE = bool(format(form.MAINFEATURE.data))  # must be 1 for True 0 for False
         app.logger.debug(f"main={config.MAINFEATURE}")
         job.disctype = format(form.DISCTYPE.data)
+        for key, value in cfg.items():
+            setattr(config, key, value)
         db.session.commit()
         db.session.refresh(job)
         db.session.refresh(config)
@@ -611,7 +586,7 @@ def customtitle():
     return render_template('customTitle.html', title='Change Title', form=form, job=job)
 
 
-@app.route('/list_titles')
+@app.route('/list_titles', methods=['GET', 'POST'])
 @login_required
 def list_titles():
     """
@@ -626,9 +601,17 @@ def list_titles():
         app.logger.debug("list_titles - no job supplied")
         flash("No job supplied", "danger")
         return redirect('/error')
-
+    job = Job.query.get(job_id)
+    form = TitleSearchForm(obj=job)
     search_results = utils.metadata_selector("search", title, year)
-    return render_template('list_titles.html', results=search_results, job_id=job_id)
+    if search_results is None or 'Error' in search_results or ('Search' in search_results and len(search_results['Search']) < 1):
+        app.logger.debug("No results found. Trying without year")
+        flash(f"No search results found for {title} ({year})<br/> Trying without year", 'danger')
+        search_results = utils.metadata_selector("search", title, "")
+    if search_results is None or 'Error' in search_results or ('Search' in search_results and len(search_results['Search']) < 1):
+        flash(f"No search results found for {title}", 'danger')
+    return render_template('list_titles.html', results=search_results, job_id=job_id,
+                           form=form, title=title, year=year)
 
 
 @app.route('/gettitle', methods=['GET', 'POST'])
@@ -659,7 +642,7 @@ def gettitle():
 @login_required
 def updatetitle():
     """
-    ...
+    used to save the details from the search
     """
     # updatetitle?title=Home&amp;year=2015&amp;imdbID=tt2224026&amp;type=movie&amp;
     #  poster=http://image.tmdb.org/t/p/original/usFenYnk6mr8C62dB1MoAfSWMGR.jpg&amp;job_id=109
@@ -685,7 +668,7 @@ def updatetitle():
     db.session.commit()
     # TODO: show the previous values that were set, not just assume it was _auto
     flash(f'Title: {job.title_auto} ({job.year_auto}) was updated to {new_title} ({new_year})', "success")
-    return redirect(request.referrer)
+    return redirect("/")
 
 
 @app.route('/')
@@ -713,8 +696,10 @@ def home():
         mfreegb = 0
         media_percent = 0
         app.logger.debug("ARM folders not found")
-        flash("There was a problem accessing the ARM folders. Please make sure you have setup the ARMui", "danger")
-        # We could check for the install file here  and then error out if we want
+        flash("There was a problem accessing the ARM folders. Please make sure you have setup ARM<br/>"
+              "Setup can be started by visiting <a href=\"/setup\">setup page</a> ARM will not work correctly until"
+              "until you have added an admin account", "danger")
+    # We could check for the install file here  and then error out if we want
     #  RAM
     memory = psutil.virtual_memory()
     mem_total = round(memory.total / 1073741824, 1)

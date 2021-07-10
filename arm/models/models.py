@@ -2,10 +2,17 @@ import os
 import pyudev
 import psutil
 import logging
+import time
+
+from arm.ripper import music_brainz
 from arm.ui import db
 from arm.config.config import cfg
 from flask_login import LoginManager, current_user, login_user, UserMixin  # noqa: F401
 from prettytable import PrettyTable
+
+hidden_attribs = ("OMDB_API_KEY", "EMBY_USERID", "EMBY_PASSWORD", "EMBY_API_KEY", "PB_KEY", "IFTTT_KEY", "PO_KEY",
+                  "PO_USER_KEY", "PO_APP_KEY", "ARM_API_KEY", "TMDB_API_KEY")
+HIDDEN_VALUE = "<hidden>"
 
 
 class Job(db.Model):
@@ -85,6 +92,52 @@ class Job(db.Model):
         p = psutil.Process(pid)
         self.pid = pid
         self.pid_hash = hash(p)
+
+    def get_disc_type(self, found_hvdvd_ts):
+        if self.disctype == "music":
+            logging.debug("Disc is music.")
+            self.label = music_brainz.main(self)
+        elif os.path.isdir(self.mountpoint + "/VIDEO_TS"):
+            logging.debug(f"Found: {self.mountpoint}/VIDEO_TS")
+            self.disctype = "dvd"
+        elif os.path.isdir(self.mountpoint + "/video_ts"):
+            logging.debug(f"Found: {self.mountpoint}/video_ts")
+            self.disctype = "dvd"
+        elif os.path.isdir(self.mountpoint + "/BDMV"):
+            logging.debug(f"Found: {self.mountpoint}/BDMV")
+            self.disctype = "bluray"
+        elif os.path.isdir(self.mountpoint + "/HVDVD_TS"):
+            logging.debug(f"Found: {self.mountpoint}/HVDVD_TS")
+            # do something here
+        elif found_hvdvd_ts:
+            logging.debug("Found file: HVDVD_TS")
+            # do something here too
+        else:
+            logging.debug("Did not find valid dvd/bd files. Changing disctype to 'data'")
+            self.disctype = "data"
+
+    def identify_audio_cd(self):
+        """
+        Get the title for audio cds to use for the logfile name.
+
+        Needs the job class passed into it so it can be forwarded to mb
+
+        return - only the logfile - setup_logging() adds the full path
+        """
+        # Use the music label if we can find it - defaults to music_cd.log
+        disc_id = music_brainz.get_disc_id(self)
+        mb_title = music_brainz.get_title(disc_id, self)
+        if mb_title == "not identified":
+            self.label = self.title = "not identified"
+            logfile = "music_cd.log"
+            new_log_file = f"music_cd_{round(time.time() * 100)}.log"
+        else:
+            logfile = f"{mb_title}.log"
+            new_log_file = f"{mb_title}_{round(time.time() * 100)}.log"
+
+        temp_log_full = os.path.join(cfg['LOGPATH'], logfile)
+        logfile = new_log_file if os.path.isfile(temp_log_full) else logfile
+        return logfile
 
     def __str__(self):
         """Returns a string of the object"""
@@ -233,10 +286,8 @@ class Config(db.Model):
         for attr, value in self.__dict__.items():
             if s:
                 s = s + "\n"
-            if str(attr) in (
-                    "OMDB_API_KEY", "EMBY_USERID", "EMBY_PASSWORD", "EMBY_API_KEY", "PB_KEY", "IFTTT_KEY", "PO_KEY",
-                    "PO_USER_KEY", "PO_APP_KEY") and value:
-                value = "<hidden>"
+            if str(attr) in hidden_attribs and value:
+                value = HIDDEN_VALUE
             s = s + str(attr) + ":" + str(value)
 
         return s
@@ -245,10 +296,8 @@ class Config(db.Model):
         """Returns a string of the object"""
         s = self.__class__.__name__ + ": "
         for attr, value in self.__dict__.items():
-            if str(attr) in (
-                    "OMDB_API_KEY", "EMBY_USERID", "EMBY_PASSWORD", "EMBY_API_KEY", "PB_KEY", "IFTTT_KEY", "PO_KEY",
-                    "PO_USER_KEY", "PO_APP_KEY") and value:
-                value = "<hidden>"
+            if str(attr) in hidden_attribs and value:
+                value = HIDDEN_VALUE
             s = s + "(" + str(attr) + "=" + str(value) + ") "
 
         return s
@@ -259,19 +308,15 @@ class Config(db.Model):
         x.field_names = ["Config", "Value"]
         x._max_width = {"Config": 20, "Value": 30}
         for attr, value in self.__dict__.items():
-            if str(attr) in (
-                    "OMDB_API_KEY", "EMBY_USERID", "EMBY_PASSWORD", "EMBY_API_KEY", "PB_KEY", "IFTTT_KEY", "PO_KEY",
-                    "PO_USER_KEY", "PO_APP_KEY") and value:
-                value = "<hidden>"
+            if str(attr) in hidden_attribs and value:
+                value = HIDDEN_VALUE
             x.add_row([str(attr), str(value)])
         return str(x.get_string())
 
     def get_d(self):
         r = {}
         for key, value in self.__dict__.items():
-            if str(key) not in (
-                    "OMDB_API_KEY", "EMBY_USERID", "EMBY_PASSWORD", "EMBY_API_KEY", "PB_KEY", "IFTTT_KEY", "PO_KEY",
-                    "PO_USER_KEY", "PO_APP_KEY", "_sa_instance_state"):
+            if str(key) not in hidden_attribs:
                 r[str(key)] = str(value)
         return r
 
@@ -294,7 +339,7 @@ class User(db.Model, UserMixin):
         return self.user_id
 
 
-class Alembic_version(db.Model):
+class AlembicVersion(db.Model):
     version_num = db.Column(db.String(36), autoincrement=False, primary_key=True)
 
     def __init__(self, version=None):

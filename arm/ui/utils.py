@@ -10,13 +10,14 @@ import psutil
 import requests
 import bcrypt  # noqa: F401
 import html
+import yaml
 
 from pathlib import Path
 from arm.config.config import cfg
 from flask.logging import default_handler  # noqa: F401
 
 from arm.ui import app, db
-from arm.models.models import Job, Config, Track, User, Alembic_version, UISettings  # noqa: F401
+from arm.models.models import Job, Config, Track, User, AlembicVersion, UISettings  # noqa: F401
 from flask import Flask, render_template, flash, request  # noqa: F401
 
 TMDB_YEAR_REGEX = "-[0-9]{0,2}-[0-9]{0,2}"
@@ -186,6 +187,7 @@ def call_omdb_api(title=None, year=None, imdb_id=None, plot="short"):
     try:
         title_info_json = urllib.request.urlopen(strurl).read()
         title_info = json.loads(title_info_json.decode())
+        title_info['background_url'] = None
         app.logger.debug(f"omdb - {title_info}")
     except urllib.error.HTTPError as e:
         app.logger.debug(f"omdb call failed with error - {e}")
@@ -341,7 +343,7 @@ def setup_database():
             db.create_all()
             db.session.commit()
             #  push the database version arm is looking for
-            user = Alembic_version('6dfe7244b18e')
+            user = AlembicVersion('6dfe7244b18e')
             ui_config = UISettings(1, 1, "spacelab", "en", 10, 200)
             db.session.add(ui_config)
             db.session.add(user)
@@ -423,8 +425,9 @@ def job_dupe_check(crc_id):
              False if we didnt find any with the same crc
               - Will also return None as a secondary param
     """
-    # TODO possibly only grab hasnicetitles ?
-    jobs = Job.query.filter_by(crc_id=crc_id, status="success")
+    if crc_id is None:
+        return False, None
+    jobs = Job.query.filter_by(crc_id=crc_id, status="success", hasnicetitle=True)
     # app.logger.debug("search - posts=" + str(jobs))
     r = {}
     i = 0
@@ -710,7 +713,7 @@ def tmdb_find(imdb_id):
     return s
 
 
-def metadata_selector(func, query=None, year=None, imdb_id=None):
+def metadata_selector(func, query="", year="", imdb_id=""):
     """
     Used to switch between OMDB or TMDB as the metadata provider
     - TMDB returned queries are converted into the OMDB format
@@ -725,20 +728,19 @@ def metadata_selector(func, query=None, year=None, imdb_id=None):
     if cfg['METADATA_PROVIDER'].lower() == "tmdb":
         app.logger.debug("provider tmdb")
         if func == "search":
-            return tmdb_search(query, year)
+            return tmdb_search(str(query), str(year))
         elif func == "get_details":
             if query:
-                return get_tmdb_poster(query, year)
+                return get_tmdb_poster(str(query), str(year))
             elif imdb_id:
                 return tmdb_find(imdb_id)
 
     elif cfg['METADATA_PROVIDER'].lower() == "omdb":
         app.logger.debug("provider omdb")
         if func == "search":
-            return call_omdb_api(query, year)
+            return call_omdb_api(str(query), str(year))
         elif func == "get_details":
-            s = call_omdb_api(title=query, year=year, imdb_id=imdb_id, plot="full")
-            s['background_url'] = None
+            s = call_omdb_api(title=str(query), year=str(year), imdb_id=str(imdb_id), plot="full")
             return s
     app.logger.debug(cfg['METADATA_PROVIDER'])
     app.logger.debug("unknown provider - doing nothing, saying nothing. Getting Kryten")
@@ -778,7 +780,7 @@ def fix_permissions(j_id):
         directory_to_traverse = ts.group(1)
     else:
         app.logger.debug("not found")
-        directory_to_traverse = os.path.join(job.config.MEDIA_DIR, str(job.title) + " (" + str(job.year) + ")")
+        directory_to_traverse = os.path.join(job.config.COMPLETED_PATH, str(job.title) + " (" + str(job.year) + ")")
     try:
         corrected_chmod_value = int(str(job.config.CHMOD_VALUE), 8)
         app.logger.info("Setting permissions to: " + str(job.config.CHMOD_VALUE) + " on: " + directory_to_traverse)
@@ -823,3 +825,25 @@ def trigger_restart():
     now = datetime.datetime.now()
     arm_main = os.path.join(os.path.dirname(os.path.abspath(__file__)), "routes.py")
     set_file_last_modified(arm_main, now)
+
+
+def get_settings(arm_cfg_file):
+    """
+    yaml file loader - is used for loading fresh arm.yaml config
+    Args:
+        arm_cfg_file: full path to arm.yaml
+
+    Returns:
+        cfg: the loaded yaml file
+    """
+    try:
+        with open(arm_cfg_file, "r") as f:
+            try:
+                cfg = yaml.load(f, Loader=yaml.FullLoader)
+            except Exception as e:
+                app.logger.debug(e)
+                cfg = yaml.safe_load(f)  # For older versions use this
+    except FileNotFoundError as e:
+        app.logger.debug(e)
+        cfg = {}
+    return cfg
